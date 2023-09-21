@@ -12,12 +12,26 @@ package main
 import (
 	"fmt"
 	"sync"
+	"time"
 )
+
+type CrawlScheduler struct {
+	wg       sync.WaitGroup
+	throttle <-chan time.Time
+}
+
+func NewCrawlScheduler() *CrawlScheduler {
+	return &CrawlScheduler{
+		wg: sync.WaitGroup{},
+		// 1 page per second
+		throttle: time.Tick(1 * time.Second),
+	}
+}
 
 // Crawl uses `fetcher` from the `mockfetcher.go` file to imitate a
 // real crawler. It crawls until the maximum depth has reached.
-func Crawl(url string, depth int, wg *sync.WaitGroup) {
-	defer wg.Done()
+func (cs *CrawlScheduler) Crawl(url string, depth int) {
+	defer cs.wg.Done()
 
 	if depth <= 0 {
 		return
@@ -29,21 +43,22 @@ func Crawl(url string, depth int, wg *sync.WaitGroup) {
 		return
 	}
 
-	fmt.Printf("found: %s %q\n", url, body)
+	fmt.Printf("%s found: %s %q\n", time.Now().String(), url, body)
 
-	wg.Add(len(urls))
+	cs.wg.Add(len(urls))
 	for _, u := range urls {
 		// Do not remove the `go` keyword, as Crawl() must be
 		// called concurrently
-		go Crawl(u, depth-1, wg)
+		<-cs.throttle
+		go cs.Crawl(u, depth-1)
 	}
 	return
 }
 
 func main() {
-	var wg sync.WaitGroup
+	c := NewCrawlScheduler()
+	c.wg.Add(1)
 
-	wg.Add(1)
-	Crawl("http://golang.org/", 4, &wg)
-	wg.Wait()
+	c.Crawl("http://golang.org/", 4)
+	c.wg.Wait()
 }
